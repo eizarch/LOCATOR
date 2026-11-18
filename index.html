@@ -92,6 +92,10 @@ ol{padding-left:20px;margin:6px 0}
 
   <section id="listView" class="view"><div class="pad">
     <div class="card"><h2>Family members</h2><div id="members"><p class="muted">No locations received yet.</p></div></div>
+    <div class="card"><h2>Connection check</h2>
+      <p class="muted">Listening on: <code id="diagTopic">-</code></p>
+      <div id="diag"><p class="muted">Nothing received from any phone yet. If a phone is set up, its pubTopicBase must start with the topic above (without the +/+).</p></div>
+    </div>
     <p class="muted">Members turn orange if they haven't updated in over 1 hour. Locations are end-to-end encrypted with your family secret; the relay server only sees scrambled data.</p>
   </div></section>
 
@@ -246,6 +250,25 @@ function alarm(user){
   try{ if(window.Notification && Notification.permission==="granted") new Notification("SOS from "+user,{body:"Open Family Map to see where."}); }catch(e){}
 }
 
+// ---------- connection check ----------
+const diag={};
+const DIAG_TEXT={
+  ok:["✅","Working: location received and unlocked."],
+  secret:["❌","Message arrived but the SECRET doesn't match. Re-type the Secret encryption key on this phone exactly (capital/small letters matter)."],
+  plain:["⚠️","Message arrived but it is NOT encrypted. The Secret encryption key on this phone is empty, so fill it in."],
+  bad:["⚠️","Unreadable message."]
+};
+function diagNote(topic,state){
+  const p=topic.split("/"); const who=(p[2]||"?")+" / "+(p[3]||"?");
+  diag[topic]={who,state,at:Date.now()};
+  const box=$("diag"); box.innerHTML="";
+  for(const d of Object.values(diag)){
+    const t=DIAG_TEXT[d.state]||["ℹ️","Received a "+d.state.replace("other:","")+" message (not a location) - that's fine."];
+    const el=document.createElement("p"); el.innerHTML=t[0]+" <b>"+esc(d.who)+"</b>: "+esc(t[1])+' <span class="muted">('+new Date(d.at).toLocaleTimeString()+")</span>";
+    box.appendChild(el);
+  }
+}
+
 // ---------- MQTT ----------
 let client=null;
 function setConn(state,text){ $("connDot").className="dot "+state; $("connText").textContent=text; }
@@ -258,13 +281,15 @@ function connect(){
   client.on("reconnect",()=>setConn("","Reconnecting…"));
   client.on("offline",()=>setConn("off","Offline"));
   client.on("error",e=>setConn("off","Error: "+(e&&e.message||e)));
+  $("diagTopic").textContent="fam/"+cfg.code+"/+/+";
   client.on("message",(topic,payload)=>{
     const s=payload.toString();
     if(!s){ remove(topic); return; }
-    let m; try{ m=JSON.parse(s); }catch(e){ return; }
-    if(m._type==="encrypted"){ try{ m=decrypt(m.data); }catch(e){ m=null; } if(!m) return; }
-    else return; // ignore anything unencrypted
-    if(m._type==="location" && typeof m.lat==="number") upsert(topic,m);
+    let m; try{ m=JSON.parse(s); }catch(e){ diagNote(topic,"bad"); return; }
+    if(m._type==="encrypted"){ try{ m=decrypt(m.data); }catch(e){ m=null; } if(!m){ diagNote(topic,"secret"); return; } }
+    else { diagNote(topic,"plain"); return; } // never show unencrypted data
+    if(m._type==="location" && typeof m.lat==="number"){ diagNote(topic,"ok"); upsert(topic,m); }
+    else diagNote(topic,"other:"+m._type);
   });
 }
 function publish(device,obj,cb){
