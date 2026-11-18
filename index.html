@@ -105,6 +105,11 @@ ol{padding-left:20px;margin:6px 0}
       <label for="joinCode">…or paste a join code</label>
       <textarea id="joinCode" placeholder="Join code from another family member's Setup tab"></textarea>
       <button class="btn" id="joinBtn">Join family</button>
+      <label for="manCode">…or type the family code and secret (from OwnTracks settings)</label>
+      <input id="manCode" placeholder="Family code, e.g. abc123xyz9 (the part after fam/ in the topic)">
+      <input id="manSecret" placeholder="Family secret (OwnTracks &quot;Secret encryption key&quot;)" style="margin-top:6px">
+      <button class="btn" id="manJoinBtn">Join with code + secret</button>
+      <p class="muted">Already set up your family before? Don't press "Create new family" again. A new family won't match the phones you already set up. Join with your old code instead.</p>
     </div>
 
     <div id="hasFamily" style="display:none">
@@ -306,6 +311,7 @@ function showSetup(){
 }
 $("createBtn").onclick=()=>{
   const me=cleanName($("myName").value); if(!me){ alert("Type your name first (letters and numbers only)."); return; }
+  if(!confirm("Create a BRAND NEW family?\n\nPhones you already set up will NOT show up in a new family. If you set up before, press Cancel and use 'Join with code + secret' instead.")) return;
   cfg={code:randStr(10),secret:randStr(28,"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"),me};
   save(cfg); showSetup(); connect();
 };
@@ -314,6 +320,12 @@ function tryJoin(text,me){
   catch(e){ alert("That join code doesn't look right."); return false; }
 }
 $("joinBtn").onclick=()=>{ const me=cleanName($("myName").value); if(!me){ alert("Type your name first (letters and numbers only)."); return; } tryJoin($("joinCode").value,me); };
+$("manJoinBtn").onclick=()=>{
+  const me=cleanName($("myName").value); if(!me){ alert("Type your name first (letters and numbers only)."); return; }
+  let code=$("manCode").value.trim().replace(/^fam\//,"").split("/")[0]; const secret=$("manSecret").value.trim();
+  if(!code||!secret){ alert("Type both the family code and the family secret."); return; }
+  cfg={code,secret,me}; save(cfg); showSetup(); connect();
+};
 $("copyJoin").onclick=()=>{ try{ navigator.clipboard.writeText($("myJoin").value); alert("Copied."); }catch(e){ $("myJoin").select(); } };
 $("showSecret").onclick=()=>{ const o=$("secretOut"); const show=o.style.display==="none"; $("secretVal").textContent=show?cfg.secret:""; o.style.display=show?"":"none"; };
 $("leaveBtn").onclick=()=>{ if(confirm("Remove the family secret from this device?")){ clear(); cfg=null; showSetup(); connect(); for(const k in people) remove(k); } };
