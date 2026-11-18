@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Family Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
+<style>
+:root{
+  --bg:#f6f5f2;--panel:#ffffff;--text:#1d1d1f;--muted:#6b6b70;--line:#e3e1dc;
+  --accent:#2563eb;--accent-text:#fff;--ok:#16a34a;--warn:#d97706;--danger:#dc2626;--danger-bg:#fee2e2;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141416;--panel:#1e1e21;--text:#ececef;--muted:#9a9aa2;--line:#2e2e33;
+  --accent:#4f8bff;--accent-text:#fff;--ok:#22c55e;--warn:#f59e0b;--danger:#ef4444;--danger-bg:#3b1414;}}
+:root[data-theme="dark"]{--bg:#141416;--panel:#1e1e21;--text:#ececef;--muted:#9a9aa2;--line:#2e2e33;
+  --accent:#4f8bff;--accent-text:#fff;--ok:#22c55e;--warn:#f59e0b;--danger:#ef4444;--danger-bg:#3b1414;}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:17px;margin:0;flex:1}
+.status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.on{background:var(--ok)}.dot.off{background:var(--danger)}
+nav{display:flex;background:var(--panel);border-bottom:1px solid var(--line)}
+nav button{flex:1;border:0;background:none;color:var(--muted);padding:10px;font:inherit;font-weight:600;border-bottom:2px solid transparent;cursor:pointer}
+nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{flex:1;min-height:0;position:relative}
+.view{position:absolute;inset:0;overflow:auto;display:none}
+.view.active{display:block}
+#mapView{display:none;flex-direction:column}
+#mapView.active{display:flex}
+#map{flex:1;min-height:250px}
+.pad{padding:16px;max-width:640px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.card h2{font-size:16px;margin:0 0 8px}
+.muted{color:var(--muted);font-size:13px}
+label{display:block;font-size:13px;font-weight:600;margin:10px 0 4px}
+input,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font:inherit}
+textarea{min-height:70px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.btn{display:inline-block;border:0;border-radius:8px;padding:10px 14px;font:inherit;font-weight:600;cursor:pointer;background:var(--line);color:var(--text);text-decoration:none;margin:6px 6px 0 0}
+.btn.primary{background:var(--accent);color:var(--accent-text)}
+.btn.danger{background:var(--danger);color:#fff}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.member{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.member:first-child{border-top:0}
+.avatar{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;flex:none;font-size:13px}
+.member .info{flex:1;min-width:0}
+.member .name{font-weight:600}
+.pill{font-size:11px;padding:2px 7px;border-radius:999px;background:var(--line);color:var(--muted);margin-left:6px}
+.pill.sos{background:var(--danger);color:#fff}
+.pill.stale{background:var(--warn);color:#fff}
+#sosBanner{display:none;background:var(--danger-bg);color:var(--danger);border-bottom:2px solid var(--danger);padding:10px 16px;font-weight:600}
+#sosBanner.show{display:block}
+.sosbar{display:flex;gap:8px;padding:10px 16px;background:var(--panel);border-top:1px solid var(--line);flex-wrap:wrap}
+.sosbar .btn{margin:0;flex:1;min-width:120px}
+.qr{background:#fff;padding:10px;display:inline-block;border-radius:8px;margin-top:8px}
+code{font-family:ui-monospace,Consolas,monospace;font-size:12px;word-break:break-all}
+ol{padding-left:20px;margin:6px 0}
+.leaflet-container{background:var(--bg)}
+.mk{width:34px;height:34px;border-radius:50%;border:3px solid #fff;display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.mk.sos{border-color:var(--danger);animation:pulse 1s infinite}
+@keyframes pulse{50%{transform:scale(1.25)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Family Map</h1>
+  <div class="status"><span class="dot" id="connDot"></span><span id="connText">Not set up</span></div>
+</header>
+<div id="sosBanner"></div>
+<nav>
+  <button data-view="mapView" class="active">Map</button>
+  <button data-view="listView">Family</button>
+  <button data-view="setupView">Setup</button>
+</nav>
+<main>
+  <section id="mapView" class="view active">
+    <div id="map"></div>
+    <div class="sosbar">
+      <button class="btn danger" id="sosBtn">SOS – I need help</button>
+      <button class="btn" id="shareBtn">Share my location now</button>
+      <button class="btn" id="safeBtn" style="display:none">I'm safe now</button>
+    </div>
+  </section>
+
+  <section id="listView" class="view"><div class="pad">
+    <div class="card"><h2>Family members</h2><div id="members"><p class="muted">No locations received yet.</p></div></div>
+    <p class="muted">Members turn orange if they haven't updated in over 1 hour. Locations are end-to-end encrypted with your family secret; the relay server only sees scrambled data.</p>
+  </div></section>
+
+  <section id="setupView" class="view"><div class="pad">
+    <div class="card" id="noFamily">
+      <h2>Start</h2>
+      <p class="muted">Create your family once (on one device), then use the join code on every other device that opens this page.</p>
+      <label for="myName">Your name on this device</label>
+      <input id="myName" placeholder="e.g. kuya" maxlength="20">
+      <button class="btn primary" id="createBtn">Create new family</button>
+      <label for="joinCode">…or paste a join code</label>
+      <textarea id="joinCode" placeholder="Join code from another family member's Setup tab"></textarea>
+      <button class="btn" id="joinBtn">Join family</button>
+    </div>
+
+    <div id="hasFamily" style="display:none">
+      <div class="card">
+        <h2>This device</h2>
+        <p>Name: <b id="meName"></b> · Family code: <code id="famCode"></code></p>
+        <label>Join code (for opening this page on another phone or PC)</label>
+        <textarea id="myJoin" readonly></textarea>
+        <p class="muted">Keep this private. Anyone with it can see your family's locations.</p>
+        <button class="btn" id="copyJoin">Copy join code</button>
+        <button class="btn" id="showSecret">Show family secret</button>
+        <button class="btn" id="leaveBtn">Forget family on this device</button>
+        <p id="secretOut" style="display:none">Family secret (OwnTracks "Encryption key"): <code id="secretVal"></code></p>
+      </div>
+
+      <div class="card">
+        <h2>Add a family member's phone (OwnTracks)</h2>
+        <ol class="muted">
+          <li>On their phone, install <b>OwnTracks</b> (free, App Store or Google Play) and open it once.</li>
+          <li>Type their name below and press <b>Make setup code</b>.</li>
+          <li>Scan the QR with their phone camera (or open the link on their phone). OwnTracks opens and asks to import, so tap yes.</li>
+          <li>Allow location <b>"Always"</b> (iPhone) / <b>"Allow all the time"</b> (Android).</li>
+        </ol>
+        <label for="memName">Their name</label>
+        <input id="memName" placeholder="e.g. mama, papa, ate" maxlength="20">
+        <label for="memTid">Initials on the map (2 letters)</label>
+        <input id="memTid" placeholder="e.g. MA" maxlength="2">
+        <button class="btn primary" id="makeCfg">Make setup code</button>
+        <div id="cfgOut" style="display:none">
+          <div class="qr" id="qr"></div>
+          <p><a class="btn" id="cfgLink" href="#">Open in OwnTracks (tap on their phone)</a></p>
+          <p class="muted">This code contains your family secret. Don't post it anywhere.</p>
+        </div>
+      </div>
+    </div>
+  </div></section>
+</main>
+
+<script>
+(function(){
+"use strict";
+const BROKER_WSS = "wss://broker.hivemq.com:8884/mqtt";
+const BROKER_HOST = "broker.hivemq.com", BROKER_PORT = 8883;
+const STALE_MS = 60*60*1000;
+const COLORS = ["#2563eb","#db2777","#059669","#7c3aed","#ea580c","#0891b2","#65a30d","#be123c"];
+const $ = id => document.getElementById(id);
+
+// ---------- storage ----------
+function load(){ try{ return JSON.parse(localStorage.getItem("famcfg")||"null"); }catch(e){ return null; } }
+function save(c){ try{ localStorage.setItem("famcfg", JSON.stringify(c)); }catch(e){} }
+function clear(){ try{ localStorage.removeItem("famcfg"); }catch(e){} }
+let cfg = load();
+
+// ---------- helpers ----------
+const enc = new TextEncoder(), dec = new TextDecoder();
+function b64e(u8){ let s=""; for(const b of u8) s+=String.fromCharCode(b); return btoa(s); }
+function b64d(s){ const bin=atob(s); const u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return u; }
+function utf8b64(str){ return b64e(enc.encode(str)); }
+function randStr(n, chars){ chars = chars || "abcdefghijkmnpqrstuvwxyz23456789"; const r=nacl.randomBytes(n); let s=""; for(const b of r) s+=chars[b%chars.length]; return s; }
+function cleanName(s){ return (s||"").toLowerCase().trim().replace(/[^a-z0-9-]/g,"").slice(0,20); }
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+function colorFor(name){ let h=0; for(const c of name) h=(h*31+c.charCodeAt(0))>>>0; return COLORS[h%COLORS.length]; }
+function ago(ts){ const s=Math.max(0,(Date.now()/1000-ts)|0); if(s<60) return "just now"; if(s<3600) return (s/60|0)+" min ago"; if(s<86400) return (s/3600|0)+" h ago"; return (s/86400|0)+" days ago"; }
+function osm(lat,lon){ return "https://www.openstreetmap.org/?mlat="+lat+"&mlon="+lon+"#map=17/"+lat+"/"+lon; }
+
+// OwnTracks-compatible encryption: libsodium secretbox, key = secret bytes zero-padded to 32
+function key(){ const k=new Uint8Array(32); k.set(enc.encode(cfg.secret).slice(0,32)); return k; }
+function decrypt(data){
+  const raw=b64d(data); const nonce=raw.slice(0,24), box=raw.slice(24);
+  const out=nacl.secretbox.open(box, nonce, key()); return out ? JSON.parse(dec.decode(out)) : null;
+}
+function encrypt(obj){
+  const nonce=nacl.randomBytes(24); const box=nacl.secretbox(enc.encode(JSON.stringify(obj)), nonce, key());
+  const all=new Uint8Array(24+box.length); all.set(nonce); all.set(box,24);
+  return JSON.stringify({_type:"encrypted", data:b64e(all)});
+}
+
+// ---------- tabs ----------
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x===b));
+  document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id===b.dataset.view));
+  if(b.dataset.view==="mapView") setTimeout(()=>map.invalidateSize(),50);
+});
+
+// ---------- map ----------
+const map = L.map("map").setView([12.8797,121.774],5);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+const people = {}; // key: topic -> {user,device,lat,lon,tst,batt,acc,tid,sos,marker}
+let fitted = false;
+
+function render(){
+  const list = Object.values(people).sort((a,b)=>(b.sos-a.sos)||(b.tst-a.tst));
+  const box = $("members");
+  box.innerHTML = list.length ? "" : '<p class="muted">No locations received yet.</p>';
+  const sosList = [];
+  for(const p of list){
+    const stale = Date.now()/1000 - p.tst > STALE_MS/1000;
+    if(p.sos) sosList.push(p);
+    const el=document.createElement("div"); el.className="member";
+    el.innerHTML = '<div class="avatar" style="background:'+(p.sos?"var(--danger)":colorFor(p.user))+'">'+esc(p.tid||p.user.slice(0,2).toUpperCase())+'</div>'+
+      '<div class="info"><div class="name">'+esc(p.user)+(p.sos?'<span class="pill sos">SOS</span>':"")+(stale&&!p.sos?'<span class="pill stale">not updating</span>':"")+'</div>'+
+      '<div class="muted">'+ago(p.tst)+(p.batt!=null?" · battery "+p.batt+"%":"")+(p.acc?" · ±"+p.acc+" m":"")+(p.device==="sos"||p.device==="web"?" · from Family Map":"")+'</div></div>'+
+      '<div class="row"><button class="btn" data-k="'+esc(p.key)+'">Show</button><a class="btn" target="_blank" rel="noopener" href="'+osm(p.lat,p.lon)+'">Open map</a></div>';
+    el.querySelector("button").onclick=()=>{ document.querySelector('nav button[data-view="mapView"]').click(); map.setView([p.lat,p.lon],16); p.marker.openPopup(); };
+    box.appendChild(el);
+  }
+  const ban=$("sosBanner");
+  if(sosList.length){ ban.classList.add("show"); ban.innerHTML="🚨 SOS from "+sosList.map(p=>esc(p.user)+" ("+ago(p.tst)+')  <a href="'+osm(p.lat,p.lon)+'" target="_blank" rel="noopener" style="color:inherit">map</a>').join(", "); }
+  else ban.classList.remove("show");
+}
+
+function upsert(topic, m){
+  const parts=topic.split("/"); const user=parts[2], device=parts[3];
+  const k=topic;
+  const isSos = device==="sos" && m.sos===true;
+  let p=people[k];
+  const isNewSos = isSos && (!p || p.tst!==m.tst);
+  if(!p){ p=people[k]={key:k,user,device}; }
+  Object.assign(p,{lat:m.lat,lon:m.lon,tst:m.tst||Math.floor(Date.now()/1000),batt:m.batt,acc:m.acc,tid:m.tid,sos:isSos});
+  const html='<div class="mk'+(isSos?" sos":"")+'" style="background:'+(isSos?"#dc2626":colorFor(user))+'">'+esc(m.tid||user.slice(0,2).toUpperCase())+'</div>';
+  const icon=L.divIcon({html,className:"",iconSize:[34,34],iconAnchor:[17,17]});
+  const pop='<b>'+esc(user)+'</b>'+(isSos?" 🚨 SOS":"")+'<br>'+ago(p.tst)+(p.batt!=null?"<br>Battery "+p.batt+"%":"")+'<br><a target="_blank" rel="noopener" href="'+osm(p.lat,p.lon)+'">Open in map</a>';
+  if(p.marker){ p.marker.setLatLng([p.lat,p.lon]).setIcon(icon).setPopupContent(pop); }
+  else { p.marker=L.marker([p.lat,p.lon],{icon}).addTo(map).bindPopup(pop); }
+  if(isNewSos && Date.now()/1000 - p.tst < 6*3600) alarm(user);
+  if(!fitted){ fitted=true; map.setView([p.lat,p.lon],14); }
+  render();
+}
+function remove(topic){ const p=people[topic]; if(p){ map.removeLayer(p.marker); delete people[topic]; render(); } }
+
+function alarm(user){
+  try{ navigator.vibrate && navigator.vibrate([400,200,400,200,400]); }catch(e){}
+  try{ const a=new (window.AudioContext||window.webkitAudioContext)(); const o=a.createOscillator(); o.type="square"; o.frequency.value=880; o.connect(a.destination); o.start(); setTimeout(()=>{o.stop();a.close();},1500); }catch(e){}
+  try{ if(window.Notification && Notification.permission==="granted") new Notification("SOS from "+user,{body:"Open Family Map to see where."}); }catch(e){}
+}
+
+// ---------- MQTT ----------
+let client=null;
+function setConn(state,text){ $("connDot").className="dot "+state; $("connText").textContent=text; }
+function connect(){
+  if(client){ try{client.end(true);}catch(e){} client=null; }
+  if(!cfg) { setConn("","Not set up"); return; }
+  setConn("","Connecting…");
+  client = mqtt.connect(BROKER_WSS,{clientId:"fm-"+cfg.code+"-"+randStr(6),reconnectPeriod:5000,connectTimeout:15000,clean:true});
+  client.on("connect",()=>{ setConn("on","Live"); client.subscribe("fam/"+cfg.code+"/+/+",{qos:1}); });
+  client.on("reconnect",()=>setConn("","Reconnecting…"));
+  client.on("offline",()=>setConn("off","Offline"));
+  client.on("error",e=>setConn("off","Error: "+(e&&e.message||e)));
+  client.on("message",(topic,payload)=>{
+    const s=payload.toString();
+    if(!s){ remove(topic); return; }
+    let m; try{ m=JSON.parse(s); }catch(e){ return; }
+    if(m._type==="encrypted"){ try{ m=decrypt(m.data); }catch(e){ m=null; } if(!m) return; }
+    else return; // ignore anything unencrypted
+    if(m._type==="location" && typeof m.lat==="number") upsert(topic,m);
+  });
+}
+function publish(device,obj,cb){
+  if(!client||!client.connected){ alert("Not connected to the internet relay yet. Try again in a moment."); return; }
+  client.publish("fam/"+cfg.code+"/"+cfg.me+"/"+device, obj===null?"":encrypt(obj), {qos:1,retain:true}, cb);
+}
+
+// ---------- location / SOS ----------
+function getPos(cb){
+  if(!navigator.geolocation){ alert("This browser can't get your location."); return; }
+  navigator.geolocation.getCurrentPosition(pos=>cb(pos),err=>alert("Couldn't get location: "+err.message+"\nTurn on GPS/location and allow it for this page."),{enableHighAccuracy:true,timeout:20000,maximumAge:0});
+}
+function locObj(pos,extra){
+  const o={_type:"location",lat:+pos.coords.latitude.toFixed(6),lon:+pos.coords.longitude.toFixed(6),acc:Math.round(pos.coords.accuracy),tst:Math.floor(Date.now()/1000),tid:cfg.me.slice(0,2).toUpperCase()};
+  return Object.assign(o,extra||{});
+}
+async function battery(){ try{ if(navigator.getBattery){ const b=await navigator.getBattery(); return Math.round(b.level*100); } }catch(e){} return undefined; }
+
+$("sosBtn").onclick=()=>{
+  if(!cfg){ alert("Set up your family first in the Setup tab."); return; }
+  if(!confirm("Send SOS with your location to your whole family?")) return;
+  getPos(async pos=>{
+    const o=locObj(pos,{sos:true,tid:"!!"}); const b=await battery(); if(b!=null) o.batt=b;
+    publish("sos",o,()=>{
+      $("safeBtn").style.display="";
+      const msg="SOS! I need help. My location: "+osm(o.lat,o.lon);
+      if(confirm("SOS sent to Family Map.\n\nAlso send a text message (SMS) in case they have no data?")) location.href="sms:?&body="+encodeURIComponent(msg);
+    });
+  });
+};
+$("safeBtn").onclick=()=>{ publish("sos",null,()=>{ $("safeBtn").style.display="none"; }); };
+$("shareBtn").onclick=()=>{
+  if(!cfg){ alert("Set up your family first in the Setup tab."); return; }
+  getPos(async pos=>{ const o=locObj(pos); const b=await battery(); if(b!=null) o.batt=b; publish("web",o,()=>alert("Location shared.")); });
+};
+try{ if(window.Notification && Notification.permission==="default") document.addEventListener("click",function ask(){ Notification.requestPermission(); document.removeEventListener("click",ask); },{once:true}); }catch(e){}
+
+// ---------- setup ----------
+function joinCodeOf(c){ return utf8b64(JSON.stringify({c:c.code,s:c.secret})); }
+function showSetup(){
+  $("noFamily").style.display = cfg?"none":"";
+  $("hasFamily").style.display = cfg?"":"none";
+  if(cfg){ $("meName").textContent=cfg.me; $("famCode").textContent=cfg.code; $("myJoin").value=joinCodeOf(cfg); }
+}
+$("createBtn").onclick=()=>{
+  const me=cleanName($("myName").value); if(!me){ alert("Type your name first (letters and numbers only)."); return; }
+  cfg={code:randStr(10),secret:randStr(28,"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"),me};
+  save(cfg); showSetup(); connect();
+};
+function tryJoin(text,me){
+  try{ const j=JSON.parse(dec.decode(b64d(text.trim()))); if(!j.c||!j.s) throw 0; cfg={code:j.c,secret:j.s,me}; save(cfg); showSetup(); connect(); return true; }
+  catch(e){ alert("That join code doesn't look right."); return false; }
+}
+$("joinBtn").onclick=()=>{ const me=cleanName($("myName").value); if(!me){ alert("Type your name first (letters and numbers only)."); return; } tryJoin($("joinCode").value,me); };
+$("copyJoin").onclick=()=>{ try{ navigator.clipboard.writeText($("myJoin").value); alert("Copied."); }catch(e){ $("myJoin").select(); } };
+$("showSecret").onclick=()=>{ const o=$("secretOut"); const show=o.style.display==="none"; $("secretVal").textContent=show?cfg.secret:""; o.style.display=show?"":"none"; };
+$("leaveBtn").onclick=()=>{ if(confirm("Remove the family secret from this device?")){ clear(); cfg=null; showSetup(); connect(); for(const k in people) remove(k); } };
+
+$("makeCfg").onclick=()=>{
+  const name=cleanName($("memName").value); if(!name){ alert("Type their name (letters and numbers only)."); return; }
+  const tid=(($("memTid").value||name.slice(0,2)).toUpperCase().replace(/[^A-Z0-9]/g,"")+"XX").slice(0,2);
+  const conf={
+    _type:"configuration", mode:0,
+    host:BROKER_HOST, port:BROKER_PORT, tls:true,
+    auth:true, username:name, password:"family",
+    deviceId:"phone", tid, clientId:cfg.code+"-"+name,
+    encryptionKey:cfg.secret,
+    pubTopicBase:"fam/"+cfg.code+"/%u/%d",
+    subTopic:"fam/"+cfg.code+"/+/+",
+    pubRetain:true, pubQos:1, monitoring:1
+  };
+  const link="owntracks:///config?inline="+encodeURIComponent(utf8b64(JSON.stringify(conf)));
+  $("qr").innerHTML=""; new QRCode($("qr"),{text:link,width:240,height:240,correctLevel:QRCode.CorrectLevel.L});
+  $("cfgLink").href=link; $("cfgOut").style.display="";
+};
+
+// join via link: page.html#join=CODE
+if(location.hash.startsWith("#join=") && !cfg){
+  $("joinCode").value=decodeURIComponent(location.hash.slice(6));
+  document.querySelector('nav button[data-view="setupView"]').click();
+}
+if(!cfg) document.querySelector('nav button[data-view="setupView"]').click();
+showSetup(); connect();
+setInterval(render,30000);
+})();
+</script>
+</body>
+</html>
